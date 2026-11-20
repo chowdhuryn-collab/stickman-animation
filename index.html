@@ -37,6 +37,7 @@ button {
   cursor: pointer;
 }
 button:hover { background: #176c91; }
+button:disabled { opacity: .6; cursor: wait; }
 </style>
 </head>
 <body>
@@ -46,14 +47,16 @@ button:hover { background: #176c91; }
 <canvas id="canvas" width="800" height="450"></canvas>
 
 <div class="controls">
-  <button onclick="play()">▶ Play</button>
+  <button id="playButton" onclick="play()">▶ Play</button>
   <button onclick="addFrame()">＋ Add Frame</button>
   <button onclick="previous()">◀ Previous</button>
   <button onclick="next()">Next ▶</button>
   <button onclick="reset()">Reset</button>
+  <button id="downloadButton" onclick="downloadAnimation()">⬇ Download Animation</button>
 </div>
 
 <p id="info">Frame 1</p>
+<p id="status" aria-live="polite"></p>
 
 <script>
 const canvas = document.getElementById("canvas");
@@ -98,29 +101,26 @@ function drawStickman(p) {
     ctx.stroke();
   }
 
-  // Head
   ctx.beginPath();
   ctx.arc(...p.head, 25, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Body
   line("head", "neck");
   line("neck", "body");
 
-  // Arms
   line("neck", "leftElbow");
   line("leftElbow", "leftHand");
+
   line("neck", "rightElbow");
   line("rightElbow", "rightHand");
 
-  // Legs
   line("body", "leftKnee");
   line("leftKnee", "leftFoot");
+
   line("body", "rightKnee");
   line("rightKnee", "rightFoot");
 
-  // Ground
-  ctx.strokeStyle = "#cccccc";
+  ctx.strokeStyle = "#ccc";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(50, 420);
@@ -130,23 +130,32 @@ function drawStickman(p) {
 
 function render() {
   drawStickman(frames[current]);
+
   document.getElementById("info").textContent =
     `Frame ${current + 1} / ${frames.length}`;
 }
 
 function addFrame() {
-  frames.splice(current + 1, 0,
-    JSON.parse(JSON.stringify(frames[current])));
+  stop();
+
+  frames.splice(
+    current + 1,
+    0,
+    JSON.parse(JSON.stringify(frames[current]))
+  );
+
   current++;
   render();
 }
 
 function next() {
+  stop();
   current = Math.min(current + 1, frames.length - 1);
   render();
 }
 
 function previous() {
+  stop();
   current = Math.max(current - 1, 0);
   render();
 }
@@ -164,16 +173,21 @@ function play() {
     return;
   }
 
+  if (frames.length < 2) {
+    document.getElementById("status").textContent =
+      "Add another frame to make an animation.";
+    return;
+  }
+
   playing = true;
+  document.getElementById("playButton").textContent = "Ⅱ Pause";
 
   function step() {
     if (!playing) return;
 
-    current++;
-
-    if (current >= frames.length) current = 0;
-
+    current = (current + 1) % frames.length;
     render();
+
     animation = setTimeout(step, 125);
   }
 
@@ -183,13 +197,126 @@ function play() {
 function stop() {
   playing = false;
   clearTimeout(animation);
+  document.getElementById("playButton").textContent = "▶ Play";
 }
 
-// Drag body parts to animate them
+// DOWNLOAD ANIMATION AS WEBM VIDEO
+async function downloadAnimation() {
+  const status = document.getElementById("status");
+  const button = document.getElementById("downloadButton");
+
+  if (!window.MediaRecorder || !canvas.captureStream) {
+    status.textContent =
+      "Video export is not supported in this browser.";
+    return;
+  }
+
+  if (frames.length < 2) {
+    status.textContent =
+      "Add at least one more frame before downloading.";
+    return;
+  }
+
+  stop();
+  button.disabled = true;
+  status.textContent = "Creating your video...";
+
+  const originalFrame = current;
+  const fps = 8;
+  const stream = canvas.captureStream(30);
+
+  let recorder;
+
+  const types = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm"
+  ];
+
+  try {
+    const type = types.find(t =>
+      MediaRecorder.isTypeSupported(t)
+    );
+
+    recorder = type
+      ? new MediaRecorder(stream, { mimeType: type })
+      : new MediaRecorder(stream);
+
+  } catch (error) {
+    stream.getTracks().forEach(t => t.stop());
+    button.disabled = false;
+    status.textContent = "Could not start video recording.";
+    current = originalFrame;
+    render();
+    return;
+  }
+
+  const chunks = [];
+
+  recorder.ondataavailable = e => {
+    if (e.data && e.data.size > 0) {
+      chunks.push(e.data);
+    }
+  };
+
+  recorder.onerror = () => {
+    status.textContent = "Recording failed.";
+    button.disabled = false;
+    stream.getTracks().forEach(t => t.stop());
+    current = originalFrame;
+    render();
+  };
+
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, {
+      type: recorder.mimeType || "video/webm"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "my-stickman-animation.webm";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    stream.getTracks().forEach(t => t.stop());
+
+    current = originalFrame;
+    render();
+
+    button.disabled = false;
+    status.textContent =
+      "Video downloaded! Check your Downloads folder.";
+  };
+
+  recorder.start();
+
+  // Record every frame
+  for (let i = 0; i < frames.length; i++) {
+    current = i;
+    render();
+
+    await new Promise(resolve =>
+      setTimeout(resolve, 1000 / fps)
+    );
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 250));
+
+  recorder.stop();
+}
+
+// DRAG BODY PARTS
 let dragging = null;
 
 canvas.addEventListener("pointerdown", e => {
   const rect = canvas.getBoundingClientRect();
+
   const x = (e.clientX - rect.left) * 800 / rect.width;
   const y = (e.clientY - rect.top) * 450 / rect.height;
 
@@ -208,7 +335,7 @@ canvas.addEventListener("pointerdown", e => {
 });
 
 canvas.addEventListener("pointermove", e => {
-  if (!dragging) return;
+  if (!dragging || playing) return;
 
   const rect = canvas.getBoundingClientRect();
 
@@ -221,6 +348,10 @@ canvas.addEventListener("pointermove", e => {
 });
 
 canvas.addEventListener("pointerup", () => {
+  dragging = null;
+});
+
+canvas.addEventListener("pointercancel", () => {
   dragging = null;
 });
 
