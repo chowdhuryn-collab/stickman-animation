@@ -1,0 +1,231 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stickman Animation Engine</title>
+<style>
+body {
+  margin: 0;
+  background: #151923;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+h1 { margin: 20px; }
+canvas {
+  background: white;
+  width: min(95%, 800px);
+  border-radius: 10px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.controls {
+  margin: 15px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+button {
+  background: #26354b;
+  color: white;
+  border: 1px solid #536783;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+button:hover { background: #176c91; }
+</style>
+</head>
+<body>
+
+<h1>Stickman Animation Engine</h1>
+
+<canvas id="canvas" width="800" height="450"></canvas>
+
+<div class="controls">
+  <button onclick="play()">▶ Play</button>
+  <button onclick="addFrame()">＋ Add Frame</button>
+  <button onclick="previous()">◀ Previous</button>
+  <button onclick="next()">Next ▶</button>
+  <button onclick="reset()">Reset</button>
+</div>
+
+<p id="info">Frame 1</p>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let frames = [];
+let current = 0;
+let playing = false;
+let animation;
+
+function newStickman() {
+  return {
+    head: [400, 100],
+    neck: [400, 140],
+    body: [400, 260],
+    leftHand: [320, 210],
+    rightHand: [480, 210],
+    leftElbow: [350, 180],
+    rightElbow: [450, 180],
+    leftKnee: [360, 330],
+    rightKnee: [440, 330],
+    leftFoot: [340, 400],
+    rightFoot: [460, 400]
+  };
+}
+
+frames.push(newStickman());
+
+function drawStickman(p) {
+  ctx.clearRect(0, 0, 800, 450);
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 800, 450);
+
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+
+  function line(a, b) {
+    ctx.beginPath();
+    ctx.moveTo(...p[a]);
+    ctx.lineTo(...p[b]);
+    ctx.stroke();
+  }
+
+  // Head
+  ctx.beginPath();
+  ctx.arc(...p.head, 25, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Body
+  line("head", "neck");
+  line("neck", "body");
+
+  // Arms
+  line("neck", "leftElbow");
+  line("leftElbow", "leftHand");
+  line("neck", "rightElbow");
+  line("rightElbow", "rightHand");
+
+  // Legs
+  line("body", "leftKnee");
+  line("leftKnee", "leftFoot");
+  line("body", "rightKnee");
+  line("rightKnee", "rightFoot");
+
+  // Ground
+  ctx.strokeStyle = "#cccccc";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(50, 420);
+  ctx.lineTo(750, 420);
+  ctx.stroke();
+}
+
+function render() {
+  drawStickman(frames[current]);
+  document.getElementById("info").textContent =
+    `Frame ${current + 1} / ${frames.length}`;
+}
+
+function addFrame() {
+  frames.splice(current + 1, 0,
+    JSON.parse(JSON.stringify(frames[current])));
+  current++;
+  render();
+}
+
+function next() {
+  current = Math.min(current + 1, frames.length - 1);
+  render();
+}
+
+function previous() {
+  current = Math.max(current - 1, 0);
+  render();
+}
+
+function reset() {
+  stop();
+  frames = [newStickman()];
+  current = 0;
+  render();
+}
+
+function play() {
+  if (playing) {
+    stop();
+    return;
+  }
+
+  playing = true;
+
+  function step() {
+    if (!playing) return;
+
+    current++;
+
+    if (current >= frames.length) current = 0;
+
+    render();
+    animation = setTimeout(step, 125);
+  }
+
+  step();
+}
+
+function stop() {
+  playing = false;
+  clearTimeout(animation);
+}
+
+// Drag body parts to animate them
+let dragging = null;
+
+canvas.addEventListener("pointerdown", e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * 800 / rect.width;
+  const y = (e.clientY - rect.top) * 450 / rect.height;
+
+  const p = frames[current];
+
+  for (const key in p) {
+    const [px, py] = p[key];
+
+    if (Math.hypot(px - x, py - y) < 35) {
+      dragging = key;
+      break;
+    }
+  }
+
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+
+  const rect = canvas.getBoundingClientRect();
+
+  frames[current][dragging] = [
+    (e.clientX - rect.left) * 800 / rect.width,
+    (e.clientY - rect.top) * 450 / rect.height
+  ];
+
+  render();
+});
+
+canvas.addEventListener("pointerup", () => {
+  dragging = null;
+});
+
+render();
+</script>
+
+</body>
+</html>
